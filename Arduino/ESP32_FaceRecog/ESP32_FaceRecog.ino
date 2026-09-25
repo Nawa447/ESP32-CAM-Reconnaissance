@@ -23,8 +23,8 @@
 #define PCLK_GPIO_NUM     22
 
 // ─── WiFi ─────────────────────────────────────────────────────
-const char *ssid     = "jojo";
-const char *password = "1234abc@";
+const char *ssid     = "xxxx";
+const char *password = "xxxx";
 
 // ─── MJPEG boundary ───────────────────────────────────────────
 #define BOUNDARY "123456789000000000000987654321"

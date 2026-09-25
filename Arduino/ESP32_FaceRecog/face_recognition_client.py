@@ -5,8 +5,6 @@ import face_recognition
 import numpy as np
 
 # ─── Profils Spéciaux Détaillés (Affichage étendu d'informations) ─────────
-# ─── Profils Spéciaux Détaillés (Affichage étendu d'informations) ─────────
-# Tu peux enrichir ou modifier les informations ici selon tes besoins
 julie_montaux_profile = {
     "Nom": "Julie Montoux",
     "Age estime": "38 ans",
@@ -31,8 +29,6 @@ SPECIAL_PROFILES = {
         "Statut": "AUTORISE (Badge Or VIP)",
         "Niveau": "Niveau 5 (Prioritaire)",
     },
-    "Julie Montaux": julie_montaux_profile,
-    # Alias automatique pour correspondre au fichier image 'Julie Montoux.png'
     "Julie Montoux": julie_montaux_profile,
 }
 
@@ -214,20 +210,13 @@ else:
         "[ATTENTION] Le dossier 'images/' n'existe pas. Créez-le et ajoutez des photos !"
     )
 
-print("Démarrage du client de reconnaissance avec la webcam du PC...")
+esp32_url = "http://10.204.142.190/stream"
+print("Démarrage du client de reconnaissance avec l'ESP32-CAM...")
 
-# Initialisation de la webcam du PC (0 = caméra par défaut)
-video_capture = cv2.VideoCapture(0)
-
-# Résolution de la webcam (640x480 recommandée pour un affichage net de la fiche)
-video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-if not video_capture.isOpened():
-    print("[ERREUR] Impossible d'ouvrir la webcam du PC.")
-    exit()
-
-print("Webcam ouverte avec succès ! Appuyez sur 'q' pour quitter.")
+# ─── Configuration de la fenêtre d'affichage agrandie ──────────
+window_name = "ESP32-CAM | Reconnaissance Faciale"
+cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+cv2.resizeWindow(window_name, 640, 480)  # Agrandit la fenêtre pour tout voir
 
 # ─── Paramètres d'optimisation anti-lag ────────────────────────
 PROCESS_EVERY_N_FRAMES = 6  # Analyse 1 image sur 6
@@ -236,96 +225,119 @@ face_locations = []
 face_names = []
 
 while True:
-    ret, frame = video_capture.read()
+    print(f"\n[CONNEXION] Tentative de connexion à {esp32_url} ...")
+    video_capture = cv2.VideoCapture(esp32_url)
 
-    if not ret or frame is None:
-        print("[AVERTISSEMENT] Impossible de lire le flux de la webcam.")
-        break
+    # Forcer la résolution à 320x240 pour l'ESP32-CAM
+    video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+    video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 
-    frame_count += 1
-
-    # On effectue le calcul de reconnaissance uniquement une frame sur N
-    if frame_count % PROCESS_EVERY_N_FRAMES == 0:
-        small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-        rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-
-        current_locations = face_recognition.face_locations(
-            rgb_small_frame, model="hog"
+    if not video_capture.isOpened():
+        print(
+            "[ERREUR] Impossible de joindre l'ESP32. Nouvelle tentative dans 3 secondes..."
         )
-        current_encodings = face_recognition.face_encodings(
-            rgb_small_frame, current_locations
-        )
+        time.sleep(3)
+        continue
 
-        current_names = []
-        for face_encoding in current_encodings:
-            name = "Inconnu"
-            if len(known_face_encodings) > 0:
-                matches = face_recognition.compare_faces(
-                    known_face_encodings, face_encoding, tolerance=0.6
-                )
-                face_distances = face_recognition.face_distance(
-                    known_face_encodings, face_encoding
-                )
+    print("Flux ouvert avec succès ! Appuyez sur 'q' pour quitter.")
 
-                if True in matches:
-                    best_match_index = np.argmin(face_distances)
-                    if matches[best_match_index]:
-                        name = known_face_names[best_match_index]
+    flux_perdu = False
+    while not flux_perdu:
+        ret, frame = video_capture.read()
 
-            current_names.append(name)
+        if not ret or frame is None:
+            print("[AVERTISSEMENT] Perte du flux de l'ESP32, reconnexion...")
+            flux_perdu = True
+            break
 
-        # Mise à jour des variables globales pour les frames intermédiaires
-        face_locations = current_locations
-        face_names = current_names
+        frame_count += 1
 
-    # Affichage sur le flux en direct
-    special_faces_to_draw = []
+        # On effectue le calcul de reconnaissance uniquement une frame sur N
+        if frame_count % PROCESS_EVERY_N_FRAMES == 0:
+            small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+            rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
 
-    for (top, right, bottom, left), name in zip(face_locations, face_names):
-        top *= 2
-        right *= 2
-        bottom *= 2
-        left *= 2
-
-        # Profils spéciaux (Julie Valat, Julie Montaux / Montoux)
-        if name in SPECIAL_PROFILES:
-            profile_data = SPECIAL_PROFILES[name]
-            special_faces_to_draw.append((profile_data, (top, right, bottom, left)))
-
-            # Journalisation détaillée dans la console (anti-spam : toutes les 4s)
-            current_time = time.time()
-            if current_time - last_vip_log_time > 4.0:
-                last_vip_log_time = current_time
-                print("\n" + "=" * 60)
-                print(f"★ [IDENTIFICATION SPECIALE] {profile_data['Nom']} reconnue !")
-                print("-" * 60)
-                for k, v in profile_data.items():
-                    if k != "Profession_courte":
-                        print(f"  • {k:<15} : {v}")
-                print("=" * 60 + "\n")
-        else:
-            # Affichage standard pour toutes les autres personnes
-            color = (0, 255, 0) if name != "Inconnu" else (0, 0, 255)
-            cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-            cv2.putText(
-                frame,
-                name,
-                (left, top - 10),
-                cv2.FONT_HERSHEY_DUPLEX,
-                0.6,
-                color,
-                2,
+            current_locations = face_recognition.face_locations(
+                rgb_small_frame, model="hog"
+            )
+            current_encodings = face_recognition.face_encodings(
+                rgb_small_frame, current_locations
             )
 
-    # Affichage de la fiche et du HUD pour les profils spéciaux détectés
-    for profile_data, face_box in special_faces_to_draw:
-        draw_special_hud(frame, profile_data, face_box)
+            current_names = []
+            for face_encoding in current_encodings:
+                name = "Inconnu"
+                if len(known_face_encodings) > 0:
+                    matches = face_recognition.compare_faces(
+                        known_face_encodings, face_encoding, tolerance=0.6
+                    )
+                    face_distances = face_recognition.face_distance(
+                        known_face_encodings, face_encoding
+                    )
 
-    cv2.imshow("Webcam PC | Reconnaissance Faciale", frame)
+                    if True in matches:
+                        best_match_index = np.argmin(face_distances)
+                        if matches[best_match_index]:
+                            name = known_face_names[best_match_index]
 
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
+                current_names.append(name)
 
-video_capture.release()
-cv2.destroyAllWindows()
-print("Arrêt du programme.")
+            # Mise à jour des variables globales pour les frames intermédiaires
+            face_locations = current_locations
+            face_names = current_names
+
+        # Affichage sur le flux en direct
+        special_faces_to_draw = []
+
+        for (top, right, bottom, left), name in zip(face_locations, face_names):
+            top *= 2
+            right *= 2
+            bottom *= 2
+            left *= 2
+
+            # Profils spéciaux (Julie Valat, Julie Montaux)
+            if name in SPECIAL_PROFILES:
+                profile_data = SPECIAL_PROFILES[name]
+                special_faces_to_draw.append((profile_data, (top, right, bottom, left)))
+
+                # Journalisation détaillée dans la console (anti-spam : toutes les 4s)
+                current_time = time.time()
+                if current_time - last_vip_log_time > 4.0:
+                    last_vip_log_time = current_time
+                    print("\n" + "=" * 60)
+                    print(
+                        f"★ [IDENTIFICATION SPECIALE] {profile_data['Nom']} reconnue !"
+                    )
+                    print("-" * 60)
+                    for k, v in profile_data.items():
+                        if k != "Profession_courte":
+                            print(f"  • {k:<15} : {v}")
+                    print("=" * 60 + "\n")
+            else:
+                # Affichage standard pour toutes les autres personnes
+                color = (0, 255, 0) if name != "Inconnu" else (0, 0, 255)
+                cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+                cv2.putText(
+                    frame,
+                    name,
+                    (left, top - 10),
+                    cv2.FONT_HERSHEY_DUPLEX,
+                    0.6,
+                    color,
+                    2,
+                )
+
+        # Affichage de la fiche et du HUD pour les profils spéciaux détectés
+        for profile_data, face_box in special_faces_to_draw:
+            draw_special_hud(frame, profile_data, face_box)
+
+        cv2.imshow(window_name, frame)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            video_capture.release()
+            cv2.destroyAllWindows()
+            print("Arrêt du programme.")
+            exit()
+
+    video_capture.release()
+    time.sleep(2)
